@@ -3,7 +3,9 @@
 from powerline.segments import Segment, with_docstring
 from powerline.theme import requires_segment_info
 from subprocess import PIPE, Popen
-import os, re, string
+import os
+import re
+import string
 
 
 @requires_segment_info
@@ -11,9 +13,9 @@ class GitStatusSegment(Segment):
 
     def execute(self, pl, command):
         pl.debug('Executing command: %s' % ' '.join(command))
-	
+
         git_env = os.environ.copy()
-        git_env['LC_ALL'] = 'C' 
+        git_env['LC_ALL'] = 'C'
 
         proc = Popen(command, stdout=PIPE, stderr=PIPE, env=git_env)
         out, err = [item.decode('utf-8') for item in proc.communicate()]
@@ -46,25 +48,25 @@ class GitStatusSegment(Segment):
         if line.startswith('## '):
             line = line[3:]
 
-        match = re.search('^Initial commit on (.+)$', line)
+        match = re.search(r'^Initial commit on (.+)$', line)
         if match is not None:
             return (match.group(1), False, 0, 0)
 
-        match = re.search('^(.+) \(no branch\)$', line)
+        match = re.search(r'^(.+) \(no branch\)$', line)
         if match is not None:
             return (match.group(1), True, 0, 0)
 
-        match = re.search('^(.+?)\.\.\.', line)
+        match = re.search(r'^(.+?)\.\.\.', line)
         if match is not None:
             branch = match.group(1)
 
-            match = re.search('\[ahead (\d+), behind (\d+)\]$', line)
+            match = re.search(r'\[ahead (\d+), behind (\d+)\]$', line)
             if match is not None:
                 return (branch, False, int(match.group(2)), int(match.group(1)))
-            match = re.search('\[ahead (\d+)\]$', line)
+            match = re.search(r'\[ahead (\d+)\]$', line)
             if match is not None:
                 return (branch, False, 0, int(match.group(1)))
-            match = re.search('\[behind (\d+)\]$', line)
+            match = re.search(r'\[behind (\d+)\]$', line)
             if match is not None:
                 return (branch, False, int(match.group(1)), 0)
 
@@ -111,8 +113,11 @@ class GitStatusSegment(Segment):
 
         return segments
 
-    def __call__(self, pl, segment_info, use_dash_c=True, show_tag=False, formats={}, detached_head_style='revision'):
+    def __call__(self, pl, segment_info, use_dash_c=True, show_tag=False, show_stashed=True, show_untracked=True, formats=None, detached_head_style='revision'):
         pl.debug('Running gitstatus %s -C' % ('with' if use_dash_c else 'without'))
+
+        if formats is None:
+            formats = {}
 
         cwd = segment_info['getcwd']()
 
@@ -124,7 +129,12 @@ class GitStatusSegment(Segment):
         if not base:
             return
 
-        status, err = self.execute(pl, base + ['status', '--branch', '--porcelain'])
+        status_args = ['status', '--branch', '--porcelain']
+        # finding all untracked files can take a long time
+        if not show_untracked:
+            status_args.append('-uno')
+
+        status, err = self.execute(pl, base + status_args)
 
         if err and ('error' in err[0] or 'fatal' in err[0]):
             return
@@ -142,7 +152,10 @@ class GitStatusSegment(Segment):
 
         staged, unmerged, changed, untracked = self.parse_status(status)
 
-        stashed = len(self.execute(pl, base + ['stash', 'list', '--no-decorate'])[0])
+        if show_stashed:
+            stashed = len(self.execute(pl, base + ['stash', 'list', '--no-decorate'])[0])
+        else:
+            stashed = 0
 
         if not show_tag:
             tag, err = [''], False
@@ -180,6 +193,14 @@ if that number is greater than zero.
 :param bool show_tag:
     Show tag description. Valid options are``contains``, ``last``, ``annotated`` and ``exact``. A value of True behaves the same as ``exact``, which only displays a tag when it's assigned to the currently checked-out revision.
     False by default, because it needs to execute git an additional time.
+
+:param bool show_untracked:
+    Show the number of untracked files.
+    True by default but may take a long time to compute in large repositories
+
+:param bool show_stashed:
+    Show the number of stashes.
+    True by default.
 
 :param dict formats:
     A string-to-string dictionary for customizing Git status formats. Valid keys include ``branch``, ``tag``, ``ahead``, ``behind``, ``staged``, ``unmerged``, ``changes``, ``untracked``, and ``stashed``.
